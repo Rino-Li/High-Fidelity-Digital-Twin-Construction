@@ -1,4 +1,4 @@
-# Towards-Real-Time-Data-Generation-and-Uncertainty-Inference-for-Digital-Twin-Construction
+# Towards Real Time Data Generation and Uncertainty Inference for Digital Twin Construction
 ![Static Badge](https://img.shields.io/badge/Bayesian%20Inference-red)![Static Badge](https://img.shields.io/badge/Windows%2011-blue)![Static Badge](https://img.shields.io/badge/Data%20Generation-grey)![Static Badge](https://img.shields.io/badge/Generative%20Adversarial%20Network-yellow)![Static Badge](https://img.shields.io/badge/Graph%20Neural%20Network-brightgreen)![Static Badge](https://img.shields.io/badge/License-MIT-purple)
 
 ## Abstract
