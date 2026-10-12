@@ -1,26 +1,73 @@
-# High-Fidelity Digital Twin Construction  Under Incomplete Measurements
-![Static Badge](https://img.shields.io/badge/Bayesian%20Inference-red)![Static Badge](https://img.shields.io/badge/Windows%2011-blue)![Static Badge](https://img.shields.io/badge/Data%20Generation-grey)![Static Badge](https://img.shields.io/badge/Generative%20Adversarial%20Network-yellow)![Static Badge](https://img.shields.io/badge/Graph%20Neural%20Network-brightgreen)![Static Badge](https://img.shields.io/badge/License-MIT-purple)
+# HEIDI: High-Fidelity Digital Twin Construction
 
-## Abstract
-Owing to the capabilities of real-time replication, parallel evolution, and feedback-driven optimization, Digital Twin (DT) is recognized as a promising paradigm for resilient production. In Industrial Internet of Things (IIoT) environments, production data are acquired by distributed sensors and transmitted to the DT in real time to support twin construction, state synchronization, and evolution correction. However, most existing studies rely on overly idealized assumptions about data availability and timeliness. In practical IIoT-enabled production systems, DT construction is often hindered by incomplete measurements caused by limited measurement capability and excessive transmission latency. To address these issues, we propose the High-Fidelity DT Construction(HEIDI) method, which includes the REaL-time uncertAinTy infErence (RELATE) module and the data-driven DT Construction module. These two modules respectively address the missing data problem caused by latency and measurement limitations, and enable the parallel evolution and feedback of the twin. In particular, RELATE consists of two core modules: a temporal graph module that enables missing data completion to adapt to time-varying production changes, and a data generation module, which explicitly models uncertainty and infers latent production states that cannot be directly measured, such as equipment wear conditions. The DT construction module includes two neural network models respond to the parallel evolution and feedback decision. Finally, we construct a simplified IIoT-enabled manufacturing DT based on HEIDI and conduct extensive experiments to validate its effectiveness.
+This package contains the architecture-level public release of **HEIDI** for
+incomplete IIoT observations. It exposes the causal graph-temporal encoder,
+edge-conditioned message passing, Bayesian latent/output heads, uncertainty
+outputs, the joint loss interface, and generic evaluation metrics.
 
-## RELATE Framework Figure
+HEIDI is designed for digital-twin construction when industrial observations
+are incomplete, delayed, or unavailable. The public code presents the method's
+overall architecture and tensor interfaces; it is intended for academic
+inspection and citation.
 
-![Framework](Architecture.png "It is the first version of the framework figure, but not the final.")
+The release is intentionally limited to the overall method structure. It does
+not contain the private experiment configuration needed to reproduce the paper
+protocol.
 
-## How to run the code?
-The required packages can be installed directly by the env.yaml file.
+This boundary reduces direct reproducibility, but it is not a cryptographic or
+legal guarantee that the method cannot be independently reimplemented.
 
-BIG code: `BIG_Network.py` and `BIG_Training.py`
+## Included
 
-DDGN code: `DDGN.py` and `GNN_Network.py`
+- HEIDI architecture code under `src/heidi/`;
+- a toy-only shape smoke test under `examples/`;
+- a public configuration template with withheld values;
+- a conceptual architecture description and the architecture figure.
 
-The data can be found in
+## Not included
 
- - https://www.kaggle.com/datasets/ramyharik/ff-2023-12-12-analog-dataset 
+- experimental or industrial datasets;
+- checkpoints, normalization statistics, results, logs, and provenance files;
+- comparison/baseline methods;
+- formal experiment launchers and the paper-run data schema;
+- private hyperparameters, seeds, missingness masks, simulator settings, and
+  other protocol details.
 
+The public smoke test is deliberately configured with toy dimensions and is not
+the paper experiment. It verifies tensor interfaces only.
 
- - https://www.kaggle.com/competitions/bosch-production-line-performance.
+## Datasets
 
+The datasets are not redistributed in this repository. Please obtain them from
+their original sources and follow their respective terms of use:
 
-**<font color=red>Note:</font>** Some personal infomation are deleted, please note these problems in running. 
+- **FFP / Future Factories analog dataset:**
+  [Kaggle dataset](https://www.kaggle.com/datasets/ramyharik/ff-2023-12-12-analog-dataset)
+- **Bosch Production Line Performance:**
+  [Kaggle competition](https://www.kaggle.com/competitions/bosch-production-line-performance)
+
+These links are provided for provenance only. Dataset access, preprocessing,
+feature mapping, normalization statistics, and the exact experiment protocol
+are not included in this release.
+
+## Quick smoke test
+
+```bash
+python -m pip install -r requirements.txt
+PYTHONPATH=src python examples/architecture_smoke.py
+```
+
+This is not a reproduction recipe. The paper-run parameter handover sheet is
+maintained outside this public directory and is provided only after a direct
+request and an appropriate citation agreement.
+
+## Citation
+
+Please cite the HEIDI paper whenever this architecture or a derivative is used.
+The final bibliographic record will be added here after publication.
+
+## License
+
+This repository is released under the MIT License; see
+[`LICENSE`](LICENSE). A license alone cannot enforce academic citation, so
+please also cite the HEIDI paper when using or extending this code.

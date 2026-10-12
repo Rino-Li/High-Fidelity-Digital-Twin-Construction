@@ -1,0 +1,32 @@
+# Public template only. Replace placeholders in a private experiment file.
+# Do not commit the private file, data, checkpoints, or result directories.
+
+model:
+  node_feature_dim: "<WITHHELD>"
+  edge_feature_dim: "<WITHHELD>"
+  global_feature_dim: "<WITHHELD>"
+  hidden_dim: "<WITHHELD>"
+  latent_dim: "<WITHHELD>"
+  graph_layers: "<WITHHELD>"
+
+training:
+  optimizer: "<WITHHELD>"
+  learning_rate: "<WITHHELD>"
+  weight_decay: "<WITHHELD>"
+  reconstruction_weight: "<WITHHELD>"
+  forecast_weight: "<WITHHELD>"
+  latent_kl_weight: "<WITHHELD>"
+  bnn_kl_weight: "<WITHHELD>"
+  epochs: "<WITHHELD>"
+  batch_size: "<WITHHELD>"
+
+data_protocol:
+  feature_columns: "<WITHHELD>"
+  normalization_statistics: "<WITHHELD>"
+  train_validation_test_split: "<WITHHELD>"
+  missingness_and_blackbox_protocol: "<WITHHELD>"
+
+evaluation:
+  monte_carlo_samples: "<WITHHELD>"
+  checkpoint_selection_rule: "<WITHHELD>"
+  random_seeds: "<WITHHELD>"
