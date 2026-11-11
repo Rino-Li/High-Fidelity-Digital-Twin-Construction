@@ -1,73 +1,98 @@
 # HEIDI: High-Fidelity Digital Twin Construction
 
-This package contains the architecture-level public release of **HEIDI** for
-incomplete IIoT observations. It exposes the causal graph-temporal encoder,
-edge-conditioned message passing, Bayesian latent/output heads, uncertainty
-outputs, the joint loss interface, and generic evaluation metrics.
+This public implementation exposes the DDGN proposal and Bayesian residual
+refinement path used by the experimental implementation, its two-stage training
+logic, and optimized endpoint recovery. It supersedes the earlier
+EndToEndBayesianDT architecture-only interface.
 
-HEIDI is designed for digital-twin construction when industrial observations
-are incomplete, delayed, or unavailable. The public code presents the method's
-overall architecture and tensor interfaces; it is intended for academic
-inspection and citation.
-
-The release is intentionally limited to the overall method structure. It does
-not contain the private experiment configuration needed to reproduce the paper
-protocol.
-
-This boundary reduces direct reproducibility, but it is not a cryptographic or
-legal guarantee that the method cannot be independently reimplemented.
+**Release scope:** architecture, training mechanics, generic evaluation
+utilities, and synthetic interface tests. Paper-run settings are intentionally
+withheld. This repository is not a turnkey reproduction of the paper's figures
+and tables, and synthetic checks do not validate the reported performance.
 
 ## Included
 
-- HEIDI architecture code under `src/heidi/`;
-- a toy-only shape smoke test under `examples/`;
-- a public configuration template with withheld values;
-- a conceptual architecture description and the architecture figure.
+- Directed edge-conditioned graph messages, causal GRU history, and DDGN proposals.
+- Bayesian residual reconstruction/forecasting that preserves received measurements.
+- A Wasserstein critic, stage-specific losses, and training that freezes DDGN
+  and the critic before fitting the Bayesian refiner.
+- Endpoint-only inference with window-local spatial vectorization, predictive
+  scales, Monte Carlo aggregation, and optional reference-RNG alignment.
+- Configurable packet primitives, shared evolution Q, offline consistency F,
+  reconstruction/uncertainty metrics, and deadline rates.
+- Synthetic examples/tests and a placeholder-only configuration template.
 
-## Not included
+## Deliberately not included
 
-- experimental or industrial datasets;
-- checkpoints, normalization statistics, results, logs, and provenance files;
-- comparison/baseline methods;
-- formal experiment launchers and the paper-run data schema;
-- private hyperparameters, seeds, missingness masks, simulator settings, and
-  other protocol details.
+Real model widths/depths, initialization settings, optimizer settings, loss
+weights, epochs, batch sizes, seeds, MC settings, checkpoint selection, channel
+probabilities/delays, visibility thresholds, feature mappings, normalization,
+data splits, topology assets, simulator coefficients, acceptance calibration,
+and measured results/timing files are not provided. Datasets, fitted weights,
+experiment launchers, baselines, and private provenance are also excluded.
+No private settings are loaded automatically.
 
-The public smoke test is deliberately configured with toy dimensions and is not
-the paper experiment. It verifies tensor interfaces only.
+Source code reveals algorithm structure and tensor interfaces. Withholding
+experiment settings does not prevent independent reimplementation.
 
-## Datasets
+## Quick check
 
-The datasets are not redistributed in this repository. Please obtain them from
-their original sources and follow their respective terms of use:
+Use Python 3.10 or later and a suitable PyTorch installation.
 
-- **FFP / Future Factories analog dataset:**
-  [Kaggle dataset](https://www.kaggle.com/datasets/ramyharik/ff-2023-12-12-analog-dataset)
-- **Bosch Production Line Performance:**
-  [Kaggle competition](https://www.kaggle.com/competitions/bosch-production-line-performance)
-
-These links are provided for provenance only. Dataset access, preprocessing,
-feature mapping, normalization statistics, and the exact experiment protocol
-are not included in this release.
-
-## Quick smoke test
-
-```bash
+~~~bash
 python -m pip install -r requirements.txt
-PYTHONPATH=src python examples/architecture_smoke.py
-```
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python examples/architecture_smoke.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python -m unittest discover -s tests -p 'test_*.py' -v
+~~~
 
-This is not a reproduction recipe. The paper-run parameter handover sheet is
-maintained outside this public directory and is provided only after a direct
-request and an appropriate citation agreement.
+Every numeric choice in examples/tests is **toy only**, not a paper setting,
+recommended configuration, data sample, or measured result.
 
-## Citation
+Supply model/training fields explicitly for private use. The template is
+documentation, not an executable experiment configuration.
 
-Please cite the HEIDI paper whenever this architecture or a derivative is used.
-The final bibliographic record will be added here after publication.
+## Interfaces
 
-## License
+Generic input shapes are:
 
-This repository is released under the MIT License; see
-[`LICENSE`](LICENSE). A license alone cannot enforce academic citation, so
-please also cite the HEIDI paper when using or extending this code.
+- node observations and boolean visibility: [batch, time, node, feature];
+- edge features: [batch, time, edge, edge_feature];
+- global context: [batch, time, global_feature];
+- directed edge indices: [source/destination, edge].
+
+Mask unavailable observations before inference. Clean targets belong only in
+offline training/evaluation. See [architecture](docs/architecture.md) and
+[evaluation semantics](docs/protocol.md).
+
+Internal DDGN/BNN state-dict module names are retained. Checkpoint loading
+requires private dimensions/numerical settings. No checkpoints are included.
+This interface replaces the previous public EndToEndBayesianDT constructor.
+
+## Communication and data
+
+The packet primitive exposes independent jitter, independent per-device burst
+states, and shared congestion. All probabilities, delay ranges, seeds, and
+visibility deadlines are caller-supplied. Virtual steps do not imply physical
+milliseconds without an external calibration.
+
+The experimental FFP line uses recorded observations. The BPLP line uses
+Bosch-derived topology with simulated dynamic states. Neither private adapter
+nor the BPLP process simulator is distributed here. A generic packet primitive
+does not replace that process simulator.
+
+Original sources:
+
+- [Future Factories analog dataset](https://www.kaggle.com/datasets/ramyharik/ff-2023-12-12-analog-dataset)
+- [Bosch Production Line Performance](https://www.kaggle.com/competitions/bosch-production-line-performance)
+
+## Citation and license
+
+Please cite the HEIDI paper when using this implementation. The final
+bibliographic record can be added after publication. See [MIT license](LICENSE).
+
+## Updating an existing checkout
+
+Copy all contents into the repository root, including hidden files, replacing
+matching files. The previous model, architecture documentation/PDF, and test
+are replaced together. Do not mix files from the two interfaces. Keep private
+settings and experimental data outside the upload.
