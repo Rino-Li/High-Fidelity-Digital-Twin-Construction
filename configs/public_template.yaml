@@ -1,32 +1,82 @@
-# Public template only. Replace placeholders in a private experiment file.
-# Do not commit the private file, data, checkpoints, or result directories.
+# Template only. All values are withheld; keep private settings outside this repository.
 
 model:
   node_feature_dim: "<WITHHELD>"
   edge_feature_dim: "<WITHHELD>"
   global_feature_dim: "<WITHHELD>"
   hidden_dim: "<WITHHELD>"
-  latent_dim: "<WITHHELD>"
   graph_layers: "<WITHHELD>"
 
+model_numerics:
+  initial_weight_rho: "<WITHHELD>"
+  weight_scale_floor: "<WITHHELD>"
+  predictive_scale_floor: "<WITHHELD>"
+  critic_negative_slope: "<WITHHELD>"
+
 training:
-  optimizer: "<WITHHELD>"
+  ddgn_epochs: "<WITHHELD>"
+  bnn_epochs: "<WITHHELD>"
   learning_rate: "<WITHHELD>"
+  critic_learning_rate: "<WITHHELD>"
   weight_decay: "<WITHHELD>"
-  reconstruction_weight: "<WITHHELD>"
-  forecast_weight: "<WITHHELD>"
-  latent_kl_weight: "<WITHHELD>"
+  critic_steps: "<WITHHELD>"
+  gradient_penalty_weight: "<WITHHELD>"
+  ddgn_reconstruction_weight: "<WITHHELD>"
+  ddgn_adversarial_weight: "<WITHHELD>"
+  bnn_reconstruction_weight: "<WITHHELD>"
+  bnn_forecast_weight: "<WITHHELD>"
   bnn_kl_weight: "<WITHHELD>"
-  epochs: "<WITHHELD>"
-  batch_size: "<WITHHELD>"
+  validation_mc_samples: "<WITHHELD>"
+  test_mc_samples: "<WITHHELD>"
+  critic_beta1: "<WITHHELD>"
+  critic_beta2: "<WITHHELD>"
+  gradient_clip_norm: "<WITHHELD>"
+  checkpoint_selection_rule: "<WITHHELD>"
 
 data_protocol:
-  feature_columns: "<WITHHELD>"
-  normalization_statistics: "<WITHHELD>"
-  train_validation_test_split: "<WITHHELD>"
-  missingness_and_blackbox_protocol: "<WITHHELD>"
+  feature_mapping: "<WITHHELD>"
+  normalization: "<WITHHELD>"
+  split_rule: "<WITHHELD>"
+  window_length: "<WITHHELD>"
+  stride: "<WITHHELD>"
+  forecast_horizon: "<WITHHELD>"
+  topology: "<WITHHELD>"
+  simulator_coefficients: "<WITHHELD>"
+
+communication:
+  random_seed: "<WITHHELD>"
+  deadline_steps: "<WITHHELD>"
+  late_probability: "<WITHHELD>"
+  drop_probability: "<WITHHELD>"
+  minimum_late_steps: "<WITHHELD>"
+  maximum_late_steps: "<WITHHELD>"
+  burst_good_to_bad_probability: "<WITHHELD>"
+  burst_bad_to_good_probability: "<WITHHELD>"
+  burst_late_probability: "<WITHHELD>"
+  burst_drop_probability: "<WITHHELD>"
+  shared_burst_state: "<WITHHELD>"
+  device_extra_delay_steps: "<WITHHELD>"
+  device_extra_delay_jitter: "<WITHHELD>"
+  straggler_device_index: "<WITHHELD>"
+
+evolution_qf:
+  hidden_dim: "<WITHHELD>"
+  epochs: "<WITHHELD>"
+  learning_rate: "<WITHHELD>"
+  weight_decay: "<WITHHELD>"
+  batch_size: "<WITHHELD>"
+  calibration_quantile: "<WITHHELD>"
+  temperature_factor: "<WITHHELD>"
+  temperature_floor: "<WITHHELD>"
+  acceptance_probability: "<WITHHELD>"
+  strict_acceptance: "<WITHHELD>"
 
 evaluation:
-  monte_carlo_samples: "<WITHHELD>"
-  checkpoint_selection_rule: "<WITHHELD>"
   random_seeds: "<WITHHELD>"
+  monte_carlo_samples: "<WITHHELD>"
+  timing_boundary: "<WITHHELD>"
+  warmup_count: "<WITHHELD>"
+  repetitions: "<WITHHELD>"
+  deadline_grid: "<WITHHELD>"
+  precision_policy: "<WITHHELD>"
+

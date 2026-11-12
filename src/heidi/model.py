@@ -1,50 +1,61 @@
-"""A causal graph-temporal Bayesian state estimator for incomplete IIoT data."""
+"""DDGN proposal and Bayesian residual refinement, with caller-supplied settings."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import torch
 from torch import nn
-from torch.nn import functional as F
+from torch.nn import functional as functional
 
 
-class BayesianLinear(nn.Module):
-    """Variational Bayesian linear layer with a standard-normal weight prior."""
+@dataclass(frozen=True)
+class ModelNumerics:
+    """Explicit initialization/stability settings; no paper defaults are provided."""
+    initial_weight_rho: float
+    weight_scale_floor: float
+    predictive_scale_floor: float
 
-    def __init__(self, in_features: int, out_features: int) -> None:
+    def __post_init__(self):
+        if self.weight_scale_floor <= 0 or self.predictive_scale_floor <= 0:
+            raise ValueError("Scale floors must be positive.")
+
+
+class VariationalLinear(nn.Module):
+    """Factorized Gaussian linear layer with a standard-normal prior."""
+
+    def __init__(self, input_dim: int, output_dim: int, *, numerics: ModelNumerics) -> None:
         super().__init__()
-        self.weight_mu = nn.Parameter(torch.empty(out_features, in_features))
-        self.weight_rho = nn.Parameter(torch.full((out_features, in_features), -5.0))
-        self.bias_mu = nn.Parameter(torch.zeros(out_features))
-        self.bias_rho = nn.Parameter(torch.full((out_features,), -5.0))
+        self.scale_floor = numerics.weight_scale_floor
+        self.weight_mu = nn.Parameter(torch.empty(output_dim, input_dim))
+        self.weight_rho = nn.Parameter(torch.full((output_dim, input_dim), numerics.initial_weight_rho))
+        self.bias_mu = nn.Parameter(torch.zeros(output_dim))
+        self.bias_rho = nn.Parameter(torch.full((output_dim,), numerics.initial_weight_rho))
         nn.init.kaiming_uniform_(self.weight_mu, a=5**0.5)
 
-    @staticmethod
-    def _sigma(rho: torch.Tensor) -> torch.Tensor:
-        return F.softplus(rho) + 1e-5
+    def _scale(self, rho: torch.Tensor) -> torch.Tensor:
+        return functional.softplus(rho) + self.scale_floor
 
-    def forward(self, values: torch.Tensor, sample: bool = True) -> torch.Tensor:
-        weight_sigma = self._sigma(self.weight_rho)
-        bias_sigma = self._sigma(self.bias_rho)
+    def forward(self, values: torch.Tensor, *, sample: bool) -> torch.Tensor:
         if sample:
-            weight = self.weight_mu + weight_sigma * torch.randn_like(self.weight_mu)
-            bias = self.bias_mu + bias_sigma * torch.randn_like(self.bias_mu)
+            weight = self.weight_mu + self._scale(self.weight_rho) * torch.randn_like(self.weight_mu)
+            bias = self.bias_mu + self._scale(self.bias_rho) * torch.randn_like(self.bias_mu)
         else:
             weight, bias = self.weight_mu, self.bias_mu
-        return F.linear(values, weight, bias)
+        return functional.linear(values, weight, bias)
 
     def kl_divergence(self) -> torch.Tensor:
-        def standard_normal_kl(mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-            return 0.5 * (mu.square() + sigma.square() - 1.0 - 2.0 * sigma.log()).sum()
+        def gaussian_kl(mean: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
+            return 0.5 * (mean.square() + scale.square() - 1.0 - 2.0 * scale.log()).sum()
 
-        return standard_normal_kl(self.weight_mu, self._sigma(self.weight_rho)) + standard_normal_kl(
-            self.bias_mu, self._sigma(self.bias_rho)
+        return gaussian_kl(self.weight_mu, self._scale(self.weight_rho)) + gaussian_kl(
+            self.bias_mu, self._scale(self.bias_rho)
         )
 
 
-class EdgeConditionedGraphLayer(nn.Module):
-    """Message passing with time-varying edge attributes and directed topology."""
+class DirectedDynamicGraphLayer(nn.Module):
+    """One directed message-passing update conditioned on current edge attributes."""
 
     def __init__(self, hidden_dim: int, edge_feature_dim: int) -> None:
         super().__init__()
@@ -59,33 +70,31 @@ class EdgeConditionedGraphLayer(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim)
 
     def forward(
-        self, node_hidden: torch.Tensor, edge_index: torch.Tensor, edge_values: torch.Tensor
+        self,
+        node_state: torch.Tensor,
+        edge_values: torch.Tensor,
+        edge_index: torch.Tensor,
     ) -> torch.Tensor:
-        # node_hidden: [batch, node, hidden], edge_values: [batch, edge, edge_feature]
         source_index, destination_index = edge_index
-        source = node_hidden[:, source_index, :]
-        destination = node_hidden[:, destination_index, :]
-        edge_hidden = self.edge_encoder(edge_values)
-        message = self.message(torch.cat([source, edge_hidden], dim=-1))
-        gate = self.gate(torch.cat([source, destination, edge_hidden], dim=-1))
-        message = gate * message
-
-        aggregate = torch.zeros_like(node_hidden)
+        source = node_state[:, source_index]
+        destination = node_state[:, destination_index]
+        edge_state = self.edge_encoder(edge_values)
+        message = self.message(torch.cat((source, edge_state), dim=-1))
+        message = message * self.gate(torch.cat((source, destination, edge_state), dim=-1))
+        aggregate = torch.zeros_like(node_state)
         aggregate.index_add_(1, destination_index, message)
-        degree = torch.zeros(node_hidden.size(1), device=node_hidden.device, dtype=node_hidden.dtype)
-        degree.index_add_(0, destination_index, torch.ones_like(destination_index, dtype=node_hidden.dtype))
-        aggregate = aggregate / degree.clamp_min(1.0).view(1, -1, 1)
-
-        batch_size, node_count, hidden_dim = node_hidden.shape
+        degree = torch.zeros(node_state.size(1), dtype=node_state.dtype, device=node_state.device)
+        degree.index_add_(0, destination_index, torch.ones_like(destination_index, dtype=node_state.dtype))
+        batch, nodes, hidden = node_state.shape
         updated = self.update(
-            aggregate.reshape(batch_size * node_count, hidden_dim),
-            node_hidden.reshape(batch_size * node_count, hidden_dim),
-        )
-        return self.norm(updated.reshape(batch_size, node_count, hidden_dim) + node_hidden)
+            (aggregate / degree.clamp_min(1.0).view(1, -1, 1)).reshape(batch * nodes, hidden),
+            node_state.reshape(batch * nodes, hidden),
+        ).reshape(batch, nodes, hidden)
+        return self.norm(updated + node_state)
 
 
-class CausalGraphTemporalEncoder(nn.Module):
-    """Spatial graph propagation followed by a forward-only temporal recurrence."""
+class DDGNGenerator(nn.Module):
+    """Causal directed dynamic graph generator that preserves observed values."""
 
     def __init__(
         self,
@@ -96,16 +105,16 @@ class CausalGraphTemporalEncoder(nn.Module):
         graph_layers: int,
     ) -> None:
         super().__init__()
-        # The input mask is a first-class feature, not just a preprocessing detail.
         self.input_projection = nn.Sequential(
             nn.Linear(2 * node_feature_dim + global_feature_dim + 1, hidden_dim),
             nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
         self.graph_layers = nn.ModuleList(
-            EdgeConditionedGraphLayer(hidden_dim, edge_feature_dim) for _ in range(graph_layers)
+            DirectedDynamicGraphLayer(hidden_dim, edge_feature_dim) for _ in range(graph_layers)
         )
         self.temporal = nn.GRU(hidden_dim, hidden_dim, batch_first=True)
+        self.decoder = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, node_feature_dim))
 
     def forward(
         self,
@@ -115,36 +124,124 @@ class CausalGraphTemporalEncoder(nn.Module):
         global_values: torch.Tensor,
         edge_index: torch.Tensor,
         time_delta: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        batch_size, time_steps, node_count, _ = input_values.shape
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        batch, steps, nodes, _ = input_values.shape
         if time_delta is None:
-            time_context = torch.ones(
-                batch_size, time_steps, node_count, 1, dtype=input_values.dtype, device=input_values.device
-            )
-        elif time_delta.ndim == 3 and time_delta.shape == (batch_size, time_steps, 1):
-            time_context = time_delta.unsqueeze(2).expand(-1, -1, node_count, -1)
-        elif time_delta.ndim == 4 and time_delta.shape == (batch_size, time_steps, node_count, 1):
+            time_context = input_values.new_ones((batch, steps, nodes, 1))
+        elif time_delta.ndim == 3:
+            time_context = time_delta.unsqueeze(2).expand(-1, -1, nodes, -1)
+        elif time_delta.ndim == 4:
             time_context = time_delta
         else:
-            raise ValueError(
-                "time_delta must have shape [batch, time, 1] or [batch, time, node, 1]."
-            )
-        global_context = global_values.unsqueeze(2).expand(-1, -1, node_count, -1)
-        hidden = self.input_projection(
-            torch.cat([input_values, input_mask.float(), global_context, time_context], dim=-1)
+            raise ValueError("time_delta must have shape [batch, time, 1] or [batch, time, node, 1].")
+        global_context = global_values.unsqueeze(2).expand(-1, -1, nodes, -1)
+        encoded = self.input_projection(
+            torch.cat((input_values, input_mask.float(), global_context, time_context), dim=-1)
         )
+        spatial_steps: list[torch.Tensor] = []
+        for index in range(steps):
+            state = encoded[:, index]
+            for layer in self.graph_layers:
+                state = layer(state, edge_values[:, index], edge_index)
+            spatial_steps.append(state)
+        spatial = torch.stack(spatial_steps, dim=1)
+        temporal_input = spatial.permute(0, 2, 1, 3).reshape(batch * nodes, steps, -1)
+        temporal_state, _ = self.temporal(temporal_input)
+        hidden = temporal_state.reshape(batch, nodes, steps, -1).permute(0, 2, 1, 3)
+        proposal = self.decoder(hidden)
+        completed = torch.where(input_mask, input_values, proposal)
+        return proposal, completed, hidden
 
-        spatial_states = []
-        for time_index in range(time_steps):
-            state = hidden[:, time_index]
-            for graph_layer in self.graph_layers:
-                state = graph_layer(state, edge_index, edge_values[:, time_index])
-            spatial_states.append(state)
-        spatial = torch.stack(spatial_states, dim=1)
 
-        temporal_input = spatial.permute(0, 2, 1, 3).reshape(batch_size * node_count, time_steps, -1)
-        temporal_output, _ = self.temporal(temporal_input)
-        return temporal_output.reshape(batch_size, node_count, time_steps, -1).permute(0, 2, 1, 3)
+class ConditionalWGANSequenceCritic(nn.Module):
+    """Conditional graph-temporal Wasserstein critic for full state trajectories."""
+
+    def __init__(
+        self,
+        node_feature_dim: int,
+        edge_feature_dim: int,
+        global_feature_dim: int,
+        hidden_dim: int,
+        *,
+        negative_slope: float,
+    ) -> None:
+        super().__init__()
+        self.input_projection = nn.Sequential(
+            nn.Linear(3 * node_feature_dim + global_feature_dim, hidden_dim), nn.LeakyReLU(negative_slope)
+        )
+        self.graph = DirectedDynamicGraphLayer(hidden_dim, edge_feature_dim)
+        self.temporal = nn.GRU(hidden_dim, hidden_dim, batch_first=True)
+        self.score = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.LeakyReLU(negative_slope), nn.Linear(hidden_dim, 1))
+
+    def forward(
+        self,
+        candidate_values: torch.Tensor,
+        observed_values: torch.Tensor,
+        observed_mask: torch.Tensor,
+        edge_values: torch.Tensor,
+        global_values: torch.Tensor,
+        edge_index: torch.Tensor,
+    ) -> torch.Tensor:
+        batch, steps, nodes, _ = candidate_values.shape
+        global_context = global_values.unsqueeze(2).expand(-1, -1, nodes, -1)
+        encoded = self.input_projection(
+            torch.cat((candidate_values, observed_values, observed_mask.float(), global_context), dim=-1)
+        )
+        graph_steps = [self.graph(encoded[:, index], edge_values[:, index], edge_index) for index in range(steps)]
+        graph_state = torch.stack(graph_steps, dim=1)
+        temporal_input = graph_state.permute(0, 2, 1, 3).reshape(batch * nodes, steps, -1)
+        temporal_state, _ = self.temporal(temporal_input)
+        pooled = temporal_state[:, -1].reshape(batch, nodes, -1).mean(dim=1)
+        return self.score(pooled).squeeze(-1)
+
+
+class BayesianResidualRefiner(nn.Module):
+    """Frozen-DDGN conditional BNN for residual reconstruction and forecasting."""
+
+    def __init__(self, node_feature_dim: int, global_feature_dim: int, hidden_dim: int, *, numerics: ModelNumerics) -> None:
+        super().__init__()
+        self.predictive_scale_floor = numerics.predictive_scale_floor
+        self.context = nn.Sequential(
+            nn.Linear(2 * node_feature_dim + global_feature_dim, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, hidden_dim)
+        )
+        self.temporal = nn.GRU(hidden_dim, hidden_dim, batch_first=True)
+        self.reconstruction_hidden = VariationalLinear(hidden_dim, hidden_dim, numerics=numerics)
+        self.reconstruction_head = VariationalLinear(hidden_dim, 2 * node_feature_dim, numerics=numerics)
+        self.forecast_hidden = VariationalLinear(hidden_dim, hidden_dim, numerics=numerics)
+        self.forecast_head = VariationalLinear(hidden_dim, 2 * node_feature_dim, numerics=numerics)
+
+    def forward(
+        self,
+        completed: torch.Tensor,
+        input_values: torch.Tensor,
+        input_mask: torch.Tensor,
+        global_values: torch.Tensor,
+        *,
+        sample: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        batch, steps, nodes, _ = completed.shape
+        global_context = global_values.unsqueeze(2).expand(-1, -1, nodes, -1)
+        context = self.context(torch.cat((completed, input_mask.float(), global_context), dim=-1))
+        temporal_input = context.permute(0, 2, 1, 3).reshape(batch * nodes, steps, -1)
+        hidden, _ = self.temporal(temporal_input)
+        hidden = hidden.reshape(batch, nodes, steps, -1).permute(0, 2, 1, 3)
+        reconstruction = self.reconstruction_head(functional.silu(self.reconstruction_hidden(hidden, sample=sample)), sample=sample)
+        forecast = self.forecast_head(functional.silu(self.forecast_hidden(hidden, sample=sample)), sample=sample)
+        residual, reconstruction_raw_std = reconstruction.chunk(2, dim=-1)
+        forecast_mean, forecast_raw_std = forecast.chunk(2, dim=-1)
+        reconstruction_mean = torch.where(input_mask, input_values, completed + residual)
+        reconstruction_std = functional.softplus(reconstruction_raw_std) + self.predictive_scale_floor
+        forecast_std = functional.softplus(forecast_raw_std) + self.predictive_scale_floor
+        kl = sum(layer.kl_divergence() for layer in self._bayesian_layers())
+        return reconstruction_mean, reconstruction_std, forecast_mean, forecast_std, kl
+
+    def _bayesian_layers(self) -> tuple[VariationalLinear, ...]:
+        return (
+            self.reconstruction_hidden,
+            self.reconstruction_head,
+            self.forecast_hidden,
+            self.forecast_head,
+        )
 
 
 class TwinOutput(NamedTuple):
@@ -153,19 +250,12 @@ class TwinOutput(NamedTuple):
     completed_mean: torch.Tensor
     forecast_mean: torch.Tensor
     forecast_std: torch.Tensor
-    posterior_mean: torch.Tensor
-    posterior_std: torch.Tensor
-    latent_kl: torch.Tensor
+    ddgn_proposal: torch.Tensor
     bnn_kl: torch.Tensor
 
 
-class EndToEndBayesianDT(nn.Module):
-    """Jointly reconstructs private/missing states and forecasts their future evolution.
-
-    The Bayesian output head models epistemic uncertainty through a variational weight
-    posterior. The sampled latent state models conditional state uncertainty. Together
-    they provide a distribution for a black-box device's intermediate state.
-    """
+class HEIDI(nn.Module):
+    """DDGN -> Bayesian residual composite; internal state-dict names are retained."""
 
     def __init__(
         self,
@@ -173,39 +263,15 @@ class EndToEndBayesianDT(nn.Module):
         edge_feature_dim: int,
         global_feature_dim: int,
         hidden_dim: int,
-        latent_dim: int,
         graph_layers: int,
+        *,
+        numerics: ModelNumerics,
     ) -> None:
-        """Build the public HEIDI architecture.
-
-        The release intentionally does not provide the paper-run dimensions or
-        layer count.  They are part of the private experiment protocol.  Any
-        positive dimensions can be supplied for a toy smoke test or an
-        independently configured application.
-        """
-        dimensions = {
-            "node_feature_dim": node_feature_dim,
-            "edge_feature_dim": edge_feature_dim,
-            "global_feature_dim": global_feature_dim,
-            "hidden_dim": hidden_dim,
-            "latent_dim": latent_dim,
-            "graph_layers": graph_layers,
-        }
-        if any(value < 1 for value in dimensions.values()):
-            raise ValueError(f"All architecture dimensions must be positive: {dimensions}")
         super().__init__()
-        self.encoder = CausalGraphTemporalEncoder(
+        self.ddgn = DDGNGenerator(
             node_feature_dim, edge_feature_dim, global_feature_dim, hidden_dim, graph_layers
         )
-        self.posterior_mean = BayesianLinear(hidden_dim, latent_dim)
-        self.posterior_raw_std = BayesianLinear(hidden_dim, latent_dim)
-        self.decoder = nn.Sequential(
-            nn.Linear(hidden_dim + latent_dim, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, 2 * node_feature_dim)
-        )
-        self.forecaster = nn.Sequential(
-            nn.Linear(hidden_dim + latent_dim, hidden_dim), nn.SiLU(), nn.Linear(hidden_dim, 2 * node_feature_dim)
-        )
-        self.node_feature_dim = node_feature_dim
+        self.bnn = BayesianResidualRefiner(node_feature_dim, global_feature_dim, hidden_dim, numerics=numerics)
 
     def forward(
         self,
@@ -214,37 +280,22 @@ class EndToEndBayesianDT(nn.Module):
         edge_values: torch.Tensor,
         global_values: torch.Tensor,
         edge_index: torch.Tensor,
+        *,
         time_delta: torch.Tensor | None = None,
-        sample_latent: bool = True,
-        sample_weights: bool = True,
+        sample_bnn: bool = True,
     ) -> TwinOutput:
-        hidden = self.encoder(
+        proposal, completed, _ = self.ddgn(
             input_values, input_mask, edge_values, global_values, edge_index, time_delta=time_delta
         )
-        posterior_mean = self.posterior_mean(hidden, sample=sample_weights)
-        posterior_std = F.softplus(self.posterior_raw_std(hidden, sample=sample_weights)) + 1e-4
-        latent = posterior_mean + posterior_std * torch.randn_like(posterior_std) if sample_latent else posterior_mean
-        decoded = self.decoder(torch.cat([hidden, latent], dim=-1))
-        reconstruction_mean, reconstruction_raw_std = decoded.chunk(2, dim=-1)
-        reconstruction_std = F.softplus(reconstruction_raw_std) + 1e-4
-        forecast = self.forecaster(torch.cat([hidden, latent], dim=-1))
-        forecast_mean, forecast_raw_std = forecast.chunk(2, dim=-1)
-        forecast_std = F.softplus(forecast_raw_std) + 1e-4
-
-        # Only fresh measurements, not delayed packets, are copied into the DT state.
-        completed_mean = torch.where(input_mask, input_values, reconstruction_mean)
-        latent_kl = 0.5 * (
-            posterior_mean.square() + posterior_std.square() - 1.0 - 2.0 * posterior_std.log()
-        ).mean()
-        bnn_kl = self.posterior_mean.kl_divergence() + self.posterior_raw_std.kl_divergence()
+        reconstruction_mean, reconstruction_std, forecast_mean, forecast_std, bnn_kl = self.bnn(
+            completed, input_values, input_mask, global_values, sample=sample_bnn
+        )
         return TwinOutput(
-            reconstruction_mean=reconstruction_mean,
-            reconstruction_std=reconstruction_std,
-            completed_mean=completed_mean,
-            forecast_mean=forecast_mean,
-            forecast_std=forecast_std,
-            posterior_mean=posterior_mean,
-            posterior_std=posterior_std,
-            latent_kl=latent_kl,
-            bnn_kl=bnn_kl,
+            reconstruction_mean,
+            reconstruction_std,
+            torch.where(input_mask, input_values, reconstruction_mean),
+            forecast_mean,
+            forecast_std,
+            proposal,
+            bnn_kl,
         )

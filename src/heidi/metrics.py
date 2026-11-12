@@ -85,3 +85,25 @@ def empirical_reconstruction_metrics(samples: torch.Tensor, target: torch.Tensor
 
 def forecast_rmse(mean: torch.Tensor, target: torch.Tensor) -> float:
     return float(torch.mean((mean - target).square()).sqrt().detach().cpu())
+
+def construction_rates(elapsed, true_probability, budgets, *, acceptance_probability: float, strict_acceptance: bool):
+    """Rate over ALL requests, using a caller-defined gate and common time units.
+
+    Positive infinity means unfinished. No communication-time conversion or
+    interpolation of missing measurements is performed.
+    """
+    if elapsed.ndim != 1 or true_probability.shape != elapsed.shape:
+        raise ValueError("Elapsed and probability tensors must be aligned vectors.")
+    if elapsed.numel() == 0 or budgets.ndim != 1:
+        raise ValueError("Requests must be nonempty and budgets one-dimensional.")
+    if not 0 <= acceptance_probability <= 1:
+        raise ValueError("Acceptance probability must be within [0, 1].")
+    if torch.isnan(elapsed).any() or (elapsed < 0).any():
+        raise ValueError("Elapsed times must be nonnegative; positive infinity is allowed.")
+    if not torch.isfinite(true_probability).all() or ((true_probability < 0) | (true_probability > 1)).any():
+        raise ValueError("Quality probabilities must be finite and within [0, 1].")
+    if not torch.isfinite(budgets).all() or (budgets < 0).any():
+        raise ValueError("Budgets must be finite and nonnegative.")
+    probabilities = true_probability.to(elapsed.device)
+    accepted = probabilities > acceptance_probability if strict_acceptance else probabilities >= acceptance_probability
+    return [float(((elapsed <= budget) & accepted).float().mean().cpu()) for budget in budgets.tolist()]
